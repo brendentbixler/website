@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" lang="en">
+    <link rel="alternate" type="application/rss+xml" href="feed.xml" title="Apoorva Joshi">
+    <link rel="stylesheet" id="style" type="text/css" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Hightlight -->
+    <link rel="stylesheet"href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/styles/vs.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <!-- Hightlight -->
+</head>
+<body>
+<div class="header">
+    <a href="http://apoorvaj.io/">apoorvaj.io</a>
+    <div style="float:right;">
+        <a href="about.html">about</a>,
+        <a href="cv.html">cv</a>
+    </div>
+</div>
+
+<article>
+<title>Exploring calling conventions with x86 assembly</title>
+<h1>Exploring calling conventions with x86 assembly</h1>
+<p class="subtitle">04-Sep-2016</p>
+
+<section>
+    <p>When I was in the process of creating the OpenGL loader that I described in my <a href="http://apoorvaj.io/loading-opengl-without-glew.html">last blog post</a>, I forgot to add the WINAPI prefix to the function declarations. Someone pointed out to me on Twitter that the code would fail on 32-bit compilation. I checked, and it did. Addition of the <code>WINAPI</code> macro fixed this problem. The <code>WINAPI</code> macro expands to <code>__stdcall</code> on 32-bit compilation on Windows.</p>
+
+    <p>I had encountered <code>stdcall</code> and more of these mysterious keywords in the past, but only had a vague idea of what they did. And so I did some web research, dumped some assembly files, and studied a three-way diff. What follows is an analysis of <code>cdecl</code>, <code>stdcall</code> and <code>fastcall</code>, and how assembly code differs between these three calling conventions.</p>
+</section>
+
+<section>
+    <h2>The experiment</h2>
+
+    <p>I wrote a small C program:</p>
+
+<pre><code class="cpp">    int __attribute__((cdecl)) foo(int a, int b) {
+        return (a < b) ? a : b;
+    }
+
+    int main() {
+        int i = foo(88, 99);
+        return i;
+    }</code></pre>
+
+    <p>I compiled the program and generated the assembly using the command <code>gcc -S -m32 main.c</code>. I did this three times, changing the value of <code>__attribute__</code> to <code>cdecl</code>, <code>stdcall</code>, and <code>fastcall</code> respectively. Then I diffed the results.</p>
+</section>
+
+<section>
+    <h2>The diff</h2>
+
+    <figure class="fullwidth"><img src="assets/asm_calling_conventions.png"/></figure>
+
+    <p>You can find the output text <a href="https://gist.github.com/ApoorvaJ/7942dde540712eebb6ad76d7cf251957">here</a>.</p>
+
+    <p>Let's have a look at the interesting parts of the generated assembly programs:</p>
+</section>
+
+<section>
+    <h2>cdecl</h2>
+
+    <p>Let's have a look at the <code>cdecl</code> assembly, starting from the <code>main:</code> block. In the stack diagrams that follow, memory addresses decrease as you go down. Thus, in the diagrams below, stacks grow downward.</p>
+
+    <p>
+        <label for="mn-1" class="margin-toggle">&#8853;</label>
+        <input type="checkbox" id="mn-1" class="margin-toggle"/>
+        <span class="marginnote">
+            <code>main:<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;pushl&nbsp;&nbsp;&nbsp;%ebp<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;movl&nbsp;&nbsp;&nbsp;&nbsp;%esp, %ebp<br>
+            <br>
+            <br>
+            <br>
+            &nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- esp, ebp</code>
+        </span>
+
+        The <code>ebp</code> register stores the base pointer, which is the base of the stack for the given stack frame. This pointer keeps pointing to the same location for the lifetime of that stack frame. The <code>esp</code> register stores the stack pointer. This pointer moves as the stack grows and shrinks. These two lines of code create a new stack frame. <code>pushl %ebp</code> pushes the previous value of <code>ebp</code> on the stack, and the <code>movl %esp, %ebp</code> moves <code>ebp</code> such that both now point at the same location.
+    </p>
+
+    <p>While returning from a function, you'll do a <code>popl %ebp</code> or a <code>leave</code> to restore the value of the previous stack frame.</p>
+
+    <hr style="border: dashed 1px;">
+
+    <p>
+        <label for="mn-2" class="margin-toggle">&#8853;</label>
+        <input type="checkbox" id="mn-2" class="margin-toggle"/>
+        <span class="marginnote">
+            <code>subl&nbsp;&nbsp;&nbsp;&nbsp;$16, %esp<br>
+            <br>
+            <br>
+            &nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- ebp<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;16 bytes<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- esp</code>
+        </span>
+
+        A value of 16 is subtracted from <code>esp</code>. Note that this is the stack growing downward, and conceptually, <code>esp</code> always denotes the top of the stack.<br><br>
+    </p>
+
+    <hr style="border: dashed 1px;">
+
+    <p>
+        <label for="mn-3" class="margin-toggle">&#8853;</label>
+        <input type="checkbox" id="mn-3" class="margin-toggle"/>
+        <span class="marginnote"><code>
+&nbsp;&nbsp;&nbsp;&nbsp;pushl&nbsp;&nbsp;&nbsp;$99<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pushl&nbsp;&nbsp;&nbsp;$88<br>
+<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- ebp<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;16 bytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;-  -  -  -  -  -<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;99&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;} 4 bytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;-  -  -  -  -  -<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;88&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;} 4 bytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- esp
+        </code></span>
+        The two parameters - 88 and 99 - are pushed onto the stack. This is because the <code>cdecl</code> calling convention doesn't allow the use of registers for passing parameters. 4 bytes are allocated per parameter because they are ints. The amount of stack space allocated doesn't necessarily equate to the sizes of the parameters. Extra space may be added for alignment purposes.<br><br>
+    </p>
+    <hr style="border: dashed 1px;">
+
+    <p>
+        <label for="mn-4" class="margin-toggle">&#8853;</label>
+        <input type="checkbox" id="mn-4" class="margin-toggle"/>
+        <span class="marginnote"><code>
+&nbsp;&nbsp;&nbsp;&nbsp;call foo<br>
+&nbsp;&nbsp;&nbsp;&nbsp;(body of foo)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;addl&nbsp;&nbsp;&nbsp;&nbsp;$8, %esp<br>
+<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- ebp<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;16 bytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;---------------- <-- esp<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;99<br>
+&nbsp;&nbsp;&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;88<br>
+&nbsp;&nbsp;&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-&nbsp;&nbsp;-<br>
+        </code></span>
+        Now, the function <code>foo</code> is called. It executes and returns. Then, we execute an <code>addl</code> instruction to increment <code>esp</code>, which shrinks the stack. This instruction cleans up the stack growth that happened when we pushed the two parameters to the stack. This is because in <code>cdecl</code>, the caller is responsible for the cleanup.<br><br><br>
+    </p>
+</section>
+<hr>
+<section>
+    <h2>stdcall</h2>
+
+    <p>The assembly for the <code>stdcall</code> variant is identical to the <code>cdecl</code> variant, except that in this variant, the callee is responsible for stack cleanup. As a result, the <code>addl</code> instruction in the main function used for cleanup is absent, and the <code>ret</code> instruction in the <code>foo</code> function is now <code>ret $8</code>.</p>
+</section>
+<hr>
+<section>
+    <h2>fastcall</h2>
+
+    <p>
+        <label for="mn-5" class="margin-toggle">&#8853;</label>
+        <input type="checkbox" id="mn-5" class="margin-toggle"/>
+        <span class="marginnote"><code>
+&nbsp;&nbsp;&nbsp;&nbsp;movl&nbsp;&nbsp;&nbsp;&nbsp;$99, %edx<br>
+&nbsp;&nbsp;&nbsp;&nbsp;movl&nbsp;&nbsp;&nbsp;&nbsp;$88, %ecx
+        </code></span>
+        The code here is substantially different, since <code>fastcall</code> allows us to pass parameters through the <code>ecx</code> and <code>edx</code> registers. The parameters are now stored in registers instead of pushing them on the stack. Note that <code>fastcall</code> only allows us to use these two registers. If more parameters need to be passed, they spill over into the stack.
+    </p>
+    <hr style="border: dashed 1px;">
+
+    <p>
+        <label for="mn-6" class="margin-toggle">&#8853;</label>
+        <input type="checkbox" id="mn-6" class="margin-toggle"/>
+        <span class="marginnote"><code>
+&nbsp;&nbsp;&nbsp;&nbsp;subl&nbsp;&nbsp;&nbsp;&nbsp;$8, %esp<br>
+&nbsp;&nbsp;&nbsp;&nbsp;movl&nbsp;&nbsp;&nbsp;&nbsp;%ecx, -4(%ebp)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;movl&nbsp;&nbsp;&nbsp;&nbsp;%edx, -8(%ebp)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;movl&nbsp;&nbsp;&nbsp;&nbsp;-4(%ebp), %eax<br>
+&nbsp;&nbsp;&nbsp;&nbsp;cmpl&nbsp;&nbsp;&nbsp;&nbsp;%eax, -8(%ebp)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;cmovle&nbsp;&nbsp;-8(%ebp), %eax
+        </code></span>
+        Although this code shows up as a substantial diff as compared to the previous variants, it is (unsurprisingly) functionally similar. It manually allocates stack space by decrementing <code>esp</code>. Then it moves the <code>ecx</code> and <code>edx</code> values on to the stack, based on addresses relative to <code>ebp</code>. Then it proceeds with the same logic the other variants.
+    </p>
+
+    <p>Addresses are different here because the parameters now belong to a different stack frame, than in the previous variants.</p>
+</section>
+<hr>
+<section>
+    <h2>Closing notes</h2>
+
+    <p>To summarize, calling conventions dictate how parameters are passed to functions, and who is in charge of the cleanup. These are the results we found:</p>
+
+    <table>
+        <tr><th>Convention</th><th>Cleanup responsibility</th><th>Parameter-passing</th></tr>
+        <tr><td><code>cdecl</code></td><td>Caller</td><td>Stack</td></tr>
+        <tr><td><code>stdcall</code></td><td>Callee</td><td>Stack</td></tr>
+        <tr><td><code>fastcall</code></td><td>Callee</td><td><code>%ecx</code>, <code>%edx</code>, Stack</td></tr>
+    </table>
+
+    <p>Fortunately, in 64-bit compilation, there aren't as many variants of calling conventions, and things seem to be a bit more sane. As a result, the specifics of the calling conventions investigated above may not be extremely valuable in a modern execution environment. However, this does give us an insight into the mechanics of parameter-passing and stack allocation and cleanup, which should be relevant even today.</p>
+
+    <p>If you would like to study this in more detail, Agner Fog has written a <a href="http://www.agner.org/optimize/calling_conventions.pdf">really good document</a> on the topic.</p>
+</section>
+</article>
+
+<hr style="margin: 0 0 0.5rem 0"/>
+<div class="footer"><div style="float:right;"><a href="mailto:apoorvaj@apoorvaj.io">email</a>, <a href="https://github.com/ApoorvaJ">github</a>, <a href="https://twitter.com/ApoorvaJ">twitter</a></div></div>
+
+<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','https://www.google-analytics.com/analytics.js','ga'); ga('create', 'UA-18556434-3', 'auto'); ga('send', 'pageview'); </script>
+</body>
+</html>

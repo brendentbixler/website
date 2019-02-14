@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" lang="en">
+    <link rel="alternate" type="application/rss+xml" href="feed.xml" title="Apoorva Joshi">
+    <link rel="stylesheet" id="style" type="text/css" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- MathJax -->
+    <script type="text/x-mathjax-config"> 
+      MathJax.Hub.Register.StartupHook("TeX AMSmath Ready",function () { 
+        MathJax.InputJax.TeX.Definitions.environment["densearray"] = 
+          ['AMSarray',null,true,true,'rcl','0em .4em']; 
+      }); 
+    </script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML'></script>
+    <!-- MathJax -->
+</head>
+<body>
+<div class="header">
+    <a href="http://apoorvaj.io/">apoorvaj.io</a>
+    <div style="float:right;">
+        <a href="about.html">about</a>,
+        <a href="cv.html">cv</a>
+    </div>
+</div>
+
+<article>
+<title>Efficient Rendering of Linear Brush Strokes—my graphics paper explained</title>
+<h1>Efficient Rendering of Linear Brush Strokes—<br>my graphics paper explained
+</h1>
+
+<p class="subtitle">14-Feb-2018</p>
+
+<section>
+    <p>I wrote a graphics paper that was published by the Journal of Computer Graphics Techniques. This is the story behind the paper, a simple explanation of it, and the things I learnt while writing it.</p>
+
+    <p>You can find the paper <a href="http://www.jcgt.org/published/0007/01/01/">here</a> (<a href="http://www.jcgt.org/published/0007/01/01/paper.pdf">PDF</a>).</p>
+</section>
+
+<section>
+    <h2>The story</h2>
+
+    <p>I've worked on <a href="http://papaya.io">Papaya</a> for over two and a half years—longer than my full-time job at NVIDIA. Ever since, Papaya has consistently been a fun but challenging project. I've found several instances of seemingly simple tasks that turned out to be quite intricate once I started to implement them.</p>
+
+    <p>One such intricacy I found was while developing the brush tool. I realized quickly that just like most other things in Papaya, I could move the task of brush rendering to the GPU.</p>
+
+    <p>First, I looked at existing image editors.</p>
+
+    <p>During my initial tests, I found out that when you dragged the brush around with the mouse, existing image editors computed the <a href="https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm">Bresenham-esque line</a> joining the last mouse position, and its current position. Then they stamped the circular brush along each pixel of the line.</p>
+
+    <figure>
+        <img src="assets/PapayaBrushDimples.png" width="40%">
+    </figure>
+
+    <p>I figured this was unnecessary, and wrote a pixel shader to compute the distance of each pixel from the aforementioned mouse delta line segment. If the distance was less than or equal to the brush radius, I filled the pixel in. If not, I kept the pixel transparent. This gave me a hard stroke without anti-aliasing.</p>
+
+    <p>This is sufficient to implement the pencil tool, but the brush tool needs more parameters such as hardness, anti-aliasing, opacity and flow. I wrote a <a href="http://apoorvaj.io/building-a-fast-modern-image-editor.html">blog post</a> declaring my triumph.</p>
+
+    <p>I figured it would be trivial to add these parameters to my existing shader. I was wrong.</p>
+
+    <p>My initial line-distance-based approach completely breaks down when you want to support brushes with anti-aliasing, hardness or flow.</p>
+
+    <p>As the mouse moves around, strokes are chained together. The end of one stroke overlaps with the beginning of the next one. This is how the user can draw strokes of any curvature, even though the editor only draws one line segment of a stroke in a frame.</p>
+
+    <p>If we use the distance from the line to compute the alpha value of the stroke, the ends of strokes don't match up. Here are two soft horizontal strokes joined up end-to-end:</p>
+
+<iframe width="640" height="360" frameborder="0" src="https://www.shadertoy.com/embed/Msdczn?gui=true&t=10&paused=false&muted=false" allowfullscreen></iframe>
+
+    <p>This is why existing editors stamp the stroke periodically along the line, and this is why my initial approach will not work.</p>
+
+    <p>I could do the same thing as existing image editors, and draw multiple overlapping stamp meshes, blending them additively along the line. While this approach is simple, it incurs the classic problem of GPU overdraw. This is because each pixel is affected by several overlapping meshes, and so drawing the stroke repeatedly involves writing to texture memory on the GPU, which is a relatively slow operation.</p>
+
+    <p>I actually had a vague hunch about how to overcome this problem two years ago. Then life happened, and I adjusted to my new job at NVIDIA, only working on Papaya in my spare time, and this niche problem took a back seat. On the way, I got better at graphics programming, and also a little better at maths. I started looking at this idea again late last year, and it eventually turned into this paper.</p>
+</section>
+
+<section>
+    <h2>A simple explanation of the paper</h2>
+
+    <p>A brush stroke is controlled by four parameters:</p>
+
+    <ol>
+        <li>The <i>diameter</i> of each circular brush stamp, in pixels.</li>
+        <li>The <i>hardness</i> controls how pixel alpha falls off with distance from the center for each stamp.</li>
+        <li>The <i>opacity</i> controls the maximum alpha of the brush stroke. No matter how much you drag the brush around, the value will not exceed the opacity, until you release the mouse and start a new stroke.</li>
+        <li>The <i>flow</i> controls how much each stamp adds to the stroke. If you have a low flow, the stroke will get more intense as you repeatedly drag the mouse over the same area. The maximum intensity is clamped to the value of opacity.</li>
+    </ol>
+
+    <p>Here's a brush stroke with a low flow. Note how the left and the right pixels are less intense because they are overlapped by fewer stamps. This is also true to a lesser extent for the pixels on the upper and lower edges of the stroke.</p>
+
+    <figure><img src="assets/gimp_brush.png"></figure>
+
+    <p>Observe that the intensity at each pixel on the stroke depends on how many stamps overlapped it. The pixels on the far right and left of the stroke are only overlapped by one stamp and hence are the faintest. The pixels along the central stroke axis are stamped by a <i>diameter</i> amount of pixels.</p>
+
+    <p>The key insight of the paper is to model a stroke as if the stamp was continuously slid across the central stroke axis, instead of the traditional way of treating stamps as discrete additive blends.</p>
+
+    <p>In our new model, the stamp slides horizontally along the middle of the stroke. So the stamp is always at a point \((x, 0.5)\), where \(x\) varies as the stamp slides.</p>
+
+    <p>For any given pixel \((X,Y)\) in our stroke, we compute the function \(f(x, X, Y)\), which gives us the instantaneous alpha value contributed to that pixel when the center of the stamp is at \((x, 0.5)\).</p>
+
+    <p>As the stamp slides from left to right, any given pixel is only inside the circular stamp for a finite amount of time. Stamps in the middle of the stroke stay inside for the longest, and hence have the most intensity.</p>
+
+    <p>We can find the centers of the first and the last circular stamp that touched any given pixel. Let's call the first (left-most) center \((X_1, 0.5)\) and let's call the last (right-most) center \((X_2, 0.5)\). This means that our pixel \((X, Y)\) was inside the stamp as the stamp moved horizontally from \(X_1\) to \(X_2\).</p>
+
+    <p>Now, we can simply integrate over these two centers, and get the total alpha (i.e. intensity) that a pixel experienced while it was inside the sliding stamp:</p>
+
+<p>\[\alpha(X,Y) = \int_{X_1}^{X_2} f(x, X, Y).dx\]</p>
+
+    <p>The alphabets here can get a bit confusing, so here's a recap:</p>
+
+    <ul>
+    <li>\((X, Y)\) are the coordinates of a pixel. They correspond to the UV coordinates in our pixel shader.</li>
+    <li>\((x, 0.5)\) is the center of the sliding stamp. We integrate over \(x\).</li>
+    <li>\(X_1\) and \(X_2\) are constant for any given pixel. They can be computed. They define the interval that we care about, and are the limits of our integral.</li>
+    <li>\(f(x, X, Y)\) is the function that gives us the instantaneous intensity experienced by point \((X, Y)\) when the stamp is at \((x, 0.5)\).</li>
+    </ul>
+
+    <p>By doing this, we can compute the intensity at a point in one go, without having to repeatedly write to texture memory. This means we're doing additional computations to reduce memory usage, which is usually a good thing.</p>
+
+    <p>With this technique, multiple strokes line up perfectly when blended additively as seen below. There are two strokes here, but you cannot tell them apart when they become the same color. This means we can get smooth, arbitrarily shaped strokes using chained line segments, which was not possible using my initial distance-based shader.</p>
+
+<iframe width="640" height="360" frameborder="0" src="https://www.shadertoy.com/embed/lstyzN?gui=true&t=10&paused=false&muted=false" allowfullscreen></iframe>
+
+    <p>The paper describes how to compute these things when brush diameter, hardness and flow vary along the stroke, as is required when using pressure-sensitive input devices.</p>
+
+    <p><b>The "Our Approach" section in the paper combines all of these concepts into a succinct list of formulae that directly map to a pixel shader. If you find the math scary, be sure to read the appendices; they are a lot friendlier.</b></p>
+
+    <p><b>To reiterate, you can find the paper <a href="http://www.jcgt.org/published/0007/01/01/">here</a> (<a href="http://www.jcgt.org/published/0007/01/01/paper.pdf">PDF</a>).</b></p>
+
+    <p>The paper has pretty comparison images. Be sure to check them out! Here are a few teaser images comparing the discrete method (top) vs this approach (bottom):</p>
+
+    <figure><div><img src="assets/constant.png" width="50%"/> <img src="assets/variable_diameter.png" width="50%"></div></figure>
+</section>
+
+<section>
+    <h2>The things I learned while writing the paper</h2>
+
+    <ul>
+        <li>Developing mathematical intuition is more important than rote-learning formulae. I <i>highly</i> recommend the <a href="https://www.youtube.com/channel/UCYO_jab_esuFRV4b17AJtAw">3Blue1Brown YouTube channel</a> for this.</li>
+        <li>It is often trickier to formulate a problem in terms of mathematics than it is to solve the subsequent math problem.</li>
+        <li>Not all applied math problems are going to be solvable like they were in school. Research primarily consists of accepting this, and exploring enough avenues without any guarantee of a final solution.</li>
+        <li>Mathematical ability is learnable. I feel a lot more confident with these kinds of problems now that I've spent significant effort solving this one.</li>
+        <li>Wikipedia is a bad source for learning maths. It can be a decent source if you want to refresh existing knowledge. Good sources are hard to come by.</li>
+        <li>Pen and paper are the best tools to think about these kinds of problems. Stepping away from a computer helped me think better. Computers are good for conducting experiments to verify your on-paper hypotheses.</li>
+        <li>If stuck, ask for help once due diligence is done. I got obsessed with trying to find a function or approximation that was analytically integrable, and I was unable to do so. I mailed <a href="http://reedbeta.com/">Nathan Reed</a> for advice, and he simply told me to take a step back and numerically integrate instead, and I ended up doing just this.</li>
+        <li>Publishing as a paper does require more effort, because your technique has to be polished and rigorous. But this may be worth it—especially if, like me, you've never published before—if only for the sheer street cred. ;)</li>
+        <li>Academic papers are expected to be terse, but I believe there is value in creating supplementary material that is easier to read for beginners who want to understand your work. I have attempted to make the paper easy to read (it's not rocket science in the first place), and I've written this blog post to give further context and explanation. Hope this helped! :)</li>
+    </ul>
+</section>
+
+</article>
+
+<hr style="margin: 0 0 0.5rem 0"/>
+<div class="footer"><div style="float:right;"><a href="mailto:apoorvaj@apoorvaj.io">email</a>, <a href="https://github.com/ApoorvaJ">github</a>, <a href="https://twitter.com/ApoorvaJ">twitter</a></div></div>
+
+<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','https://www.google-analytics.com/analytics.js','ga'); ga('create', 'UA-18556434-3', 'auto'); ga('send', 'pageview'); </script>
+</body>
+</html>

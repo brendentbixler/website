@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" lang="en">
+    <link rel="alternate" type="application/rss+xml" href="feed.xml" title="Apoorva Joshi">
+    <link rel="stylesheet" id="style" type="text/css" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Hightlight -->
+    <link rel="stylesheet"href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/styles/vs.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <!-- Hightlight -->
+</head>
+<body>
+<div class="header">
+    <a href="http://apoorvaj.io/">apoorvaj.io</a>
+    <div style="float:right;">
+        <a href="about.html">about</a>,
+        <a href="cv.html">cv</a>
+    </div>
+</div>
+
+<article>
+<title>Loading OpenGL without GLEW</title>
+<h1>Loading OpenGL without GLEW</h1>
+<p class="subtitle">20-Aug-2016</p>
+
+<section>
+    <p>This article is a result of my experiences and experiments with using OpenGL for <a href="https://github.com/ApoorvaJ/Papaya">Papaya</a>. My first few weeks learning OpenGL were challenging, because it was very different than most of the APIs I had interacted with up to that point. I'm writing this blog post because it would certainly have helped me a year ago.</p>
+
+    <p><em>The complete OpenGL loader code described in this post is located <a href="https://github.com/ApoorvaJ/Papaya/blob/3808e39b0f45d4ca4972621c847586e4060c042a/src/libs/gl_lite.h">here</a>.</em> Note that the code may change in the future, so the link points to the file as it existed at the time when this post was written. This code was written to cover Papaya's usage of OpenGL. You may need to add further functions/constants manually depending on your program's usage.</p>
+
+    <p>What follows, is hopefully a beginner-friendly explanation.</p>
+</section>
+
+<section>
+    <h2>What is OpenGL loading?</h2>
+
+    <p>OpenGL is an API specification. It is <em>not</em> a library. This means that the actual implementation behind the API varies based on your GPU hardware, your operating system, and your installed graphics driver.</p>
+
+    <p>The OpenGL specification has a lot of different functions defined in it, and the OpenGL specification gets updated periodically. The graphics driver on your machine may not (and probably does not) support all of these functions. The subset of the spec that is supported will depend on your GPU hardware capabilities and the GPU vendor's support for any given API.</p>
+
+    <p>This is the reason that all OpenGL functions aren't statically declared in a header file. Furthermore, static linkage to a library is impossible because target machines for your application will have a wildly varying set of OpenGL implementations. On Windows machines, the OpenGL implementation will be in the form a DLL. On 64-bit Windows, the 64-bit dll will be located in <code>C:\Windows\system32\opengl32.dll</code> (confusing nomenclature ftw). This DLL is a component of the graphics driver, and is shipped with it.</p>
+
+    <p>To recap, most OpenGL functions are not declared in any standardized header file, and they are not linked statically. This is why OpenGL functions can't just be called out of the box, and need to be declared and loaded explicitly.</p>
+</section>
+
+<section>
+    <h2>What is GLEW?</h2>
+
+    <p><a href="http://glew.sourceforge.net/">GLEW</a> (OpenGL Extension Wrangler) is a cross-platform library that declares and loads OpenGL functions for you. It also has handy run-time checks to see whether a given machine supports a given OpenGL profile (a profile is a guarantee that a given configuration supports a certain set of OpenGL functions).</p>
+
+    <p>GLEW is very handy, especially if you are new to OpenGL. It does most of the heavy-lifting for you, and you remain free to call any valid OpenGL function supported on your system.</p>
+
+    <p>Most StackOverflow questions regarding OpenGL loading, advise the original questioner to simply stop doing custom loading and move to GLEW. Even the official OpenGL wiki <a href="https://www.opengl.org/wiki/Load_OpenGL_Functions">strongly advises</a> you to use an OpenGL loading library.</p>
+
+    <p>While automatic loading libraries are handy, they do have some significant disadvantages. I will restrict my critique to GLEW in this particular article, but the same disadvantages generally do apply to other kinds of OpenGL loaders as well.</p>
+</section>
+
+<section>
+    <h2>Why you may be better off without GLEW</h2>
+
+    <p>You can use GLEW in two ways:
+    <ol>
+        <li>Dynamically linking: Papaya is an open-source application. Ease of building is very important to me. If an application is easy to build on someone else's machine, they are much more likely to want to work with it. Dynamic linkage means that I have to either set up a separate build process for GLEW, or I need to ship the platform and architecture-specific dynamic libraries with my source. Either way, seems very aesthetically displeasing to me.</li>
+        <li>Shipping the source: This is what I did with Papaya initially. I shipped the GLEW source and statically compiled it with the application. This keeps the build process simple and I don't need to ship platform-specific binaries with my application code. The big downside to this is that the GLEW source code is big.</li>
+    </ol></p>
+
+    <p>If you haven't done so already, I recommend you watch Fabian Giesen's interviews (<a href="https://vimeo.com/157020576">Part 1</a>, <a href="https://vimeo.com/157022266">Part 2</a>). In them, Fabian discusses the idea that code complexity is a cost too, and is also an axis on which a program should be optimized. This idea has grown on me over time, and I now try to optimize code along its complexity axis, in addition to the performance axis. Code that you will never use in any library is basically dead code, and does increase code complexity needlessly.</p>
+
+    <p>Here's a comparison of build times and the lines of code before and after I removed GLEW from Papaya.</p>
+
+    <table>
+        <tr><th>Metric</th><th>GLEW</th><th>No GLEW</th></tr>
+        <tr><td>Full rebuild time</td><td>6.9 sec</td><td>5.5 sec</td></tr>
+        <tr><td>Lines of code (cloc)</td><td>62820 loc</td><td>25427 loc</td></tr>
+    </table>
+
+    <p><em>Build times were measured using the Linux <code>time</code> command on a laptop with an SSD, and are an average of 5 passes each. Your milage may vary.</em></p>
+
+
+    <p>I ran <code>cloc</code> on just the GLEW folder, and it totaled 37,393 lines of code. That is ridiculously large. To put things into perspective, the rest of my application - platform code, image libraries, UI libraries, everything else - totaled 25,427 lines of code. <em>Just the GLEW code was larger than the rest of my application.</em></p>
+
+    <p>This primarily happens because GLEW has code to handle <em>all</em> OpenGL function APIs, where as I use a very small percentage of them.</p>
+
+    <p>My replacement code for GLEW is only ~180 lines long, and works on Windows and Linux. Mac support isn't present at the moment, but should be very trivial to add.</p>
+
+    <p>Build times have also reduced by over a second.</p>
+</section>
+
+<section>
+    <h2>How this loader works</h2>
+
+    <p>In this section, I will describe only the interesting excerpts of the code. <em>To reiterate, you can view the full source code <a href="https://github.com/ApoorvaJ/Papaya/blob/3808e39b0f45d4ca4972621c847586e4060c042a/src/libs/gl_lite.h">here</a>.</em></p>
+
+    <p>This code is based on Fabian Giesen's <a href="https://gist.github.com/rygorous/16796a0c876cf8a5f542caddb55bce8a">Bink GL extension loader</a>. I have added platform-specific code, and packaged it as a single-header file.</p>
+
+<pre><code class="cpp">    #if defined(__linux__)
+    #include &lt;dlfcn.h&gt;
+    #define GLDECL                // Empty define
+    #define PAPAYA_GL_LIST_WIN32  // Empty define
+    #endif // __linux__
+
+    #if defined(_WIN32)
+    #include &lt;windows.h&gt;
+    #define GLDECL WINAPI
+
+    #define GL_ARRAY_BUFFER         0x8892
+    #define GL_ARRAY_BUFFER_BINDING 0x8894
+    ...
+
+    typedef char GLchar;
+    typedef ptrdiff_t GLintptr;
+    typedef ptrdiff_t GLsizeiptr;
+
+    #define PAPAYA_GL_LIST_WIN32 \
+        /* ret, name, params */ \
+        GLE(void, BlendEquation, GLenum mode) \
+        GLE(void, ActiveTexture, GLenum texture) \
+        /* end */
+
+    #endif // _WIN32</code></pre>
+
+    <p>In the platform-specific header, we include the files needed for getting loading dynamic library binaries - <code>dlfcn.h</code> on POSIX systems, and <code>windows.h</code> on Windows. We also define the calling convention prefix <code>GLDECL</code> here, which is primarily needed for the loader to work correctly on 32-bit Windows.</p>
+
+    <p>We include the header file <code>GL/gl.h</code> in this loader, but this file is usually different on Windows and Linux. The Windows SDK ships with an older version (OpenGL 1.1) of the file, and hence does not contain all of the typedefs, constants and function declarations that are present in the Linux version of the same file. These need to be added manually to the Windows-specific part of our header. These constants and functions can be found in the <a href="https://www.opengl.org/registry/api/GL/glext.h">glext.h file</a>. We can choose to just include that entire file as well, but I have currently elected not to go that route.</p>
+
+<pre><code class="cpp">    #define PAPAYA_GL_LIST \
+        /* ret, name, params */ \
+        GLE(void, AttachShader, GLuint program, GLuint shader) \
+        GLE(void, BindBuffer, GLenum target, GLuint buffer) \
+        ...
+        /* end */
+
+    #define GLE(ret, name, ...) \
+        typedef ret GLDECL name##proc(__VA_ARGS__); \
+        extern name##proc * gl##name;
+    PAPAYA_GL_LIST
+    PAPAYA_GL_LIST_WIN32
+    #undef GLE</code></pre>
+
+    <p>This is the bulk of the loader. We declare all the GL functions we want to use in the PAPAYA_GL_LIST macro. These function prototypes can be found in the OpenGL registry, or on a website like <a href="http://docs.gl">docs.gl</a>. These are listed in the format <code>GLE(return type, function name, params)</code>. We don't include the "gl" prefix of the function name, purely for cosmetic reasons.</p>
+
+    <p>Note the PAPAYA_GL_LIST and GLE() macros. I took this directly from the Bink GL loader, and it is a very nifty pattern for defining macro iterators.</p>
+
+    <p>Here, this iterator macro is used to typedef function pointers, and then to declare extern function pointers. These same function pointers are later declared in the implementation section of our file. After we include this header file, we can call OpenGL functions such as <code>glAttachShader(...)</code> without getting compilation errors.</p>
+
+
+    <p>Finally, the <a href="https://github.com/ApoorvaJ/Papaya/blob/3808e39b0f45d4ca4972621c847586e4060c042a/src/libs/gl_lite.h#L130">gl_lite_init()</a> function contains the platform-specific code to load the OpenGL dynamic library, and then get the function pointers from them. Both - POSIX and Windows - follow the same basic steps:</p>
+
+    <p><ol>
+        <li>The library is loaded, and a handle is obtained. On windows, the OpenGL driver interface is located in the <code>opengl32.dll</code>, and in Linux, it is in the <code>libGL.so</code> (shared object) file. The library loading function returns an opaque handle.</li>
+        <li>This library handle is used to load a given function, based on the function name. On Windows, there is an additional level of indirection to function loading, and has to be done via the wglGetProcAddress function.</li>
+    </ol></p>
+</section>
+
+<section>
+    <h2>TL;DR</h2>
+
+    <p>GLEW is handy, but does have its disadvantages. Writing your own GL loader isn't rocket science, and will result in faster compilation, easier builds, and a smaller code base. This isn't a library as much as a code snippet, and you will probably need to customize the code to fit your needs. You can view the full code described in this article <a href="https://github.com/ApoorvaJ/Papaya/blob/3808e39b0f45d4ca4972621c847586e4060c042a/src/libs/gl_lite.h">here</a>. The file is public domain, so feel free to use it wherever.</p>
+
+    <p>If you have comments, suggestions, corrections or questions, feel free to get in touch with me on Twitter or email (links in the footer).</p>
+
+</section>
+
+</article>
+
+<hr style="margin: 0 0 0.5rem 0"/>
+<div class="footer"><div style="float:right;"><a href="mailto:apoorvaj@apoorvaj.io">email</a>, <a href="https://github.com/ApoorvaJ">github</a>, <a href="https://twitter.com/ApoorvaJ">twitter</a></div></div>
+
+<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','https://www.google-analytics.com/analytics.js','ga'); ga('create', 'UA-18556434-3', 'auto'); ga('send', 'pageview'); </script>
+</body>
+</html>

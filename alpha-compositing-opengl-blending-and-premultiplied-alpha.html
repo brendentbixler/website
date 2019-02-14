@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" lang="en">
+    <link rel="alternate" type="application/rss+xml" href="feed.xml" title="Apoorva Joshi">
+    <link rel="stylesheet" id="style" type="text/css" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- MathJax -->
+    <script type="text/x-mathjax-config"> 
+      MathJax.Hub.Register.StartupHook("TeX AMSmath Ready",function () { 
+        MathJax.InputJax.TeX.Definitions.environment["densearray"] = 
+          ['AMSarray',null,true,true,'rcl','0em .4em']; 
+      }); 
+    </script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML'></script>
+    <!-- MathJax -->
+</head>
+<body>
+<div class="header">
+    <a href="http://apoorvaj.io/">apoorvaj.io</a>
+    <div style="float:right;">
+        <a href="about.html">about</a>,
+        <a href="cv.html">cv</a>
+    </div>
+</div>
+
+<article>
+<title>Alpha Compositing, OpenGL Blending and Premultiplied Alpha</title>
+<h1>Alpha Compositing, OpenGL Blending and Premultiplied Alpha</h1>
+<p class="subtitle">30-Dec-2015</p>
+
+<section>
+    <p>I've been implementing alpha blending in <a href="https://github.com/ApoorvaJ/Papaya">Papaya</a> for the past few days, and figured that a blog post about alpha compositing with OpenGL might be useful for other developers in the future.</p>
+</section>
+
+<section>
+    <h2>What is alpha compositing?</h2>
+
+    <p><a href="https://en.wikipedia.org/wiki/Alpha_compositing">Alpha compositing</a> is the process of combining an image with a background to create the appearance of partial or full transparency.</p>
+
+    <figure><img src="assets/blending.svg" style="width:70%"/></figure>
+
+    <p>Essentially, it is the process of drawing two potentially transparent images on top of each other to create a resultant image. It is the equivalent of the image produced when a layer is blended with the "Normal" blend mode on top of another layer in Photoshop.</p>
+</section>
+
+<section>
+    <h2>Conventions and nomenclature</h2>
+
+    <p>To simplify the discussion here, we'll only talk about compositing two images at a time. More images can be composited in exactly the same way, one after the other.</p>
+
+    <p>Let us call the base image the <em>destination</em> image, since it is already present in the buffer we want to composite on.</p>
+
+    <p>Let us call the image to be "overlayed" the <em>source</em> image.</p>
+
+    <p>Any given pixel consists of the channels Red, Green, Blue and Alpha, denoted by \((R, G, B, A)\). The subscript of the channel name denotes the image it belongs to.</p>
+
+    <p>Any given pixel in the <em>source</em> image consists of channels \((R_s, G_s, B_s, A_s)\).</p>
+
+    <p>Any given pixel in the <em>destination</em> image consists of channels \((R_d, G_d, B_d, A_d)\).</p>
+
+    <p>Any given pixel in the <em>final</em> image consists of channels \((R_f, G_f, B_f, A_f)\).</p>
+
+    <p>For simplicity, we will assume that all channels lie in the range \([0, 1]\).</p>
+</section>
+
+<section>
+    <h2>How OpenGL blending works</h2>
+
+    <p>If blending is not activated explicitly, OpenGL overwrites the destination with the source image by default. In order to enable and control blending, there are three main function calls:</p>
+
+    <p><ol>
+        <li><code>glEnable(GL_BLEND)</code>: <a href="http://docs.gl/gl2/glEnable">This</a> activates blending.</li>
+        <li><code>glBlendEquation(<em>mode</em>)</code>: This function is used to set the blend mode. The blend modes dictates what is done with the scaled source and destination values. <br><br><em>e.g.</em> The most common blend mode, <code>GL_FUNC_ADD</code>, evaluates channels by addition. So \(R_f = R_s k_s + R_d k_d\). Green, Blue and Alpha channels are computed similarly.<br><br><code>GL_FUNC_SUBTRACT</code>, on the other hand, evaluates by subtraction. So \(R_f = R_s k_s - R_d k_d\). You can read in detail about this function in the <a href="http://docs.gl/gl2/glBlendEquation">docs</a>.<br><br>If you're wondering what the \(k_s\) and \(k_d\) variables are, that leads me to the third function.</li>
+        <li><code>glBlendFunc(</code>\(k_s\)<code>, </code>\(k_d\)<code>)</code>: This function is used to set the values of the scaling factors \(k_s\) and \(k_d\) for source and destination respectively. For a full list of the values the function accepts, read the <a href="http://docs.gl/gl2/glBlendFunc">docs</a>.
+        </li>
+    </ol></p>
+</section>
+
+<section>
+    <h2>The common way of alpha blending</h2>
+
+    <p>Commonly, you'll find blending set up like this:</p>
+
+    <pre><code class="cpp">    glBlendEquation (GL_FUNC_ADD);
+    glBlendFunc     (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);</code></pre>
+
+    <p>The above glBlendFunc sets the scaling factors to the following:
+
+    \[\begin{align}
+    k_s &= A_s \\
+    k_d &= (1 - A_s)
+    \end{align}\]
+    </p>
+
+    <p>Combined with <code>GL_FUNC_ADD</code>, the full formula for the final alpha \(A_f\) becomes:
+
+    \[\begin{align}
+    A_f &= A_s k_s + A_d k_d \\
+    \therefore A_f &= A_s A_s + A_d (1 - A_s)
+    \end{align}\]
+    </p>
+
+    <p>Similarly, final values for red, green and blue \((R_f, G_f, B_f)\) become:
+
+    \[(R_f, G_f, B_f) = (R_s, G_s, B_s) A_s + (R_d, G_d, B_d) (1 - A_s)\]</p>
+
+    <p>At first glance, this formula looks passable, but is in fact incorrect. The Wikipedia page for alpha compositing has the <a href="https://en.wikipedia.org/wiki/Alpha_compositing#Alpha_blending">correct formulas</a>. These formulas are:
+
+    \[\begin{align}
+    A_f &= A_s + A_d (1 - A_s) \\
+    (R_f, G_f, B_f) &= \frac{(R_s, G_s, B_s) A_s + (R_d, G_d, B_d) \mathbf{A_d} (1 - A_s)}{A_f}
+    \end{align}\]</p>
+
+    <p>Note the complete lack of the \(\mathbf{A_d}\) in the incorrect formula. One critical case in which the incorrect approach falls apart is when the destination image is translucent, <em>i.e.</em> when \(A_d < 1\).</p>
+
+    <p>I suspect that 3D engines do this because the destination is usually some kind of game frame, which usually does not have transparency. In image processing, however, this is not the case.</p>
+
+    <p>The correct formula for \((R_f, G_f, B_f)\) seemingly breaks our OpenGL API. It needs <em>two</em> multiplications instead of one: \(A_d\) and \((1 - A_s)\), and one final division by \(A_f\). How do we achieve this?</p>
+</section>
+
+<section>
+    <h2>Alpha premultiplication</h2>
+
+    <p>If a color is given by \((R, G, B, A)\), that color when premultiplied, becomes \((R \cdot A, G \cdot A, B \cdot A, A)\). In simple terms, when a color is premultiplied, its color channels are multiplied by its alpha.</p>
+
+    <p>Looking back at our correct formula,
+
+\[\begin{align}
+(R_f, G_f, B_f) &= \frac{(R_s, G_s, B_s) A_s + (R_d, G_d, B_d) A_d (1 - A_s)}{A_f} \\
+\therefore \color{blue}{(R_f, G_f, B_f) A_f} &= \color{blue}{(R_s, G_s, B_s) A_s} + \color{blue}{(R_d, G_d, B_d) A_d} (1 - A_s)
+\end{align}\]</p>
+
+    <p>Voila! The three parts highlighted in blue are essentially the premultiplied versions of the final, source and destination colors.</p>
+
+    <p>Note that the above formula is now in the OpenGL API form, with glBlendEquation set to <code>GL_FUNC_ADD</code> and glBlendFunc set to:
+
+\[\begin{align}
+k_s &= 1 \\
+k_d &= (1 - A_s)
+\end{align}\]</p>
+
+    <p>This glBlendFunc corresponds to <code>glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)</code>.</p>
+
+    <p>Therefore, if the source and destination images are premultiplied, the above setup yields the resultant image, which is in premultiplied form too. We must reverse the premultiplication process if we want to use the image outside our internal graphics pipeline.</p>
+</section>
+
+<section>
+    <h2>Conclusion</h2>
+
+    <p>To sum everything up, our pipeline now operates like this:</p>
+
+    <p><ol>
+        <li>Render destination image onto frame buffer using <a href="https://github.com/ApoorvaJ/Papaya/blob/919b45ab62b43b4f3dca4dea192b058da98aa487/src/papaya.cpp#L726">premultiplication shader</a>.</li>
+
+        <li>Render source image onto frame buffer, again, using premultiplication shader, now with blending enabled, <code>glBlendEquation(GL_FUNC_ADD)</code>, and <code>glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)</code>.</li>
+
+        <li>Reverse the premultiplication process (I like to call this demultiplication), using the <a href="https://github.com/ApoorvaJ/Papaya/blob/919b45ab62b43b4f3dca4dea192b058da98aa487/src/papaya.cpp#L747">demultiplication shader</a>.</li>
+    </ol></p>
+
+    <p>The demultiplied image is the correctly alpha blended image.</p>
+
+    <p>Note that the simplest form of demultiplication might produce invalid color values when divided by zero alpha. This does not matter in usual cases because alpha is zero, but it is relevant when the texture is mipmapped.</p>
+</section>
+
+<section>
+    <h2>Further reading</h2>
+
+    <p><ul>
+        <li><a href="https://developer.nvidia.com/content/alpha-blending-pre-or-not-pre">Premultiplication for correct filtering</a> <em>by John McDonald</em></li>
+        <li><a href="http://eelpi.gotdns.org/blog.wiki.html">Premultiplied alpha (part 1 and 2)</a> <em>by Tom Forsyth</em> (The blog is super difficult to permalink. Look in the right sidebar for the blog posts.)</li>
+</ul></p>
+</section>
+
+<section>
+    <p>If you have any corrections or suggestions, please get in touch via email or Twitter (links in footer).</p>
+</section>
+
+</article>
+
+<hr style="margin: 0 0 0.5rem 0"/>
+<div class="footer"><div style="float:right;"><a href="mailto:apoorvaj@apoorvaj.io">email</a>, <a href="https://github.com/ApoorvaJ">github</a>, <a href="https://twitter.com/ApoorvaJ">twitter</a></div></div>
+
+<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','https://www.google-analytics.com/analytics.js','ga'); ga('create', 'UA-18556434-3', 'auto'); ga('send', 'pageview'); </script>
+</body>
+</html>

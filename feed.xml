@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Apoorva Joshi</title>
+    <link>http://apoorvaj.io</link>
+
+    <item>
+      <title>Constructing a cubic Bezier that passes through four points</title>
+      <link>http://apoorvaj.io/cubic-bezier-through-four-points.html</link>
+      <pubDate>1 Feb 2019</pubDate>
+    </item>
+    <item>
+      <title>Single-Header Packer</title>
+      <link>http://apoorvaj.io/single-header-packer.html</link>
+      <pubDate>2 Apr 2018</pubDate>
+    </item>
+    <item>
+      <title>Efficient Rendering of Linear Brush Strokes—my graphics research paper explained</title>
+      <link>http://apoorvaj.io/efficient-rendering-of-linear-brush-strokes.html</link>
+      <pubDate>14 Feb 2018</pubDate>
+    </item>
+    <item>
+      <title>How not to suck at tmux</title>
+      <link>http://apoorvaj.io/how-not-to-suck-at-tmux.html</link>
+      <pubDate>13 Feb 2018</pubDate>
+    </item>
+    <item>
+      <title>Creating a modern OpenGL context</title>
+      <link>http://apoorvaj.io/creating-a-modern-opengl-context.html</link>
+      <pubDate>25 Sep 2017</pubDate>
+    </item>
+    <item>
+      <title>Exploring bump mapping with WebGL</title>
+      <link>http://apoorvaj.io/exploring-bump-mapping-with-webgl.html</link>
+      <pubDate>4 Mar 2017</pubDate>
+    </item>
+    <item>
+      <title>Hitchhiker's Guide to the GDB</title>
+      <link>http://apoorvaj.io/hitchhikers-guide-to-the-gdb.html</link>
+      <pubDate>30 Nov 2016</pubDate>
+    </item>
+    <item>
+      <title>Exploring calling conventions with x86 assembly</title>
+      <link>http://apoorvaj.io/exploring-calling-conventions.html</link>
+      <pubDate>4 Sep 2016</pubDate>
+    </item>
+    <item>
+      <title>Loading OpenGL without GLEW</title>
+      <link>http://apoorvaj.io/loading-opengl-without-glew.html</link>
+      <pubDate>20 Aug 2016</pubDate>
+    </item>
+    <item>
+      <title>Native UI is dead, long live native UI</title>
+      <link>http://apoorvaj.io/native-ui-is-dead.html</link>
+      <pubDate>13 Aug 2016</pubDate>
+    </item>
+    <item>
+      <title>Alpha Compositing, OpenGL Blending and Premultiplied Alpha</title>
+      <link>http://apoorvaj.io/alpha-compositing-opengl-blending-and-premultiplied-alpha.html</link>
+      <pubDate>30 Dec 2015</pubDate>
+    </item>
+    <item>
+      <title>Building a Fast, Modern Image Editor</title>
+      <link>http://apoorvaj.io/building-a-fast-modern-image-editor.html</link>
+      <pubDate>3 Jul 2015</pubDate>
+    </item>
+    <item>
+      <title>Android Game Architecture</title>
+      <link>http://apoorvaj.io/android-game-architecture.html</link>
+      <pubDate>13 Aug 2011</pubDate>
+    </item>
+
+  </channel>
+</rss>

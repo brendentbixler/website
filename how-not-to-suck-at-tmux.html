@@ -1,0 +1,152 @@
+<meta charset="utf-8" lang="en">
+<style class="fallback">body{visibility:hidden;}</style>
+<div style="margin-top: -30">
+<div style="float:left;"><a href="http://apoorvaj.io/">Home</a></div>
+<div style="float:right;"><a href="about.html">About</a></div>
+<div style="clear:both"></div><br>
+<hr style="margin: -20 0 0 0;"/></div>
+<!-- header -->
+
+<script>window.markdeepOptions = {tocStyle: "long"};</script>
+<!-- config -->
+
+<title>
+How not to suck at tmux
+</title>
+<div class="title">
+How not to suck at tmux
+</div>
+
+<div style="margin-top:-15"><center><i>
+13-Feb-2018
+</i></center></div>
+
+Do you use Linux? Do you need to SSH into remote or embedded devices? Do you
+feel underproductive on the command-line? Do you want to pointlessly run htop
+while doing basically no work, just to look cool and hacker-like? tmux is just
+the tool for you.
+
+![Me doing literally nothing useful but looking cool while doing so](assets/tmux.png width="80%"")
+
+# An intro to tmux
+
+tmux is a terminal multiplexer. It allows you to have multiple terminal sessions
+open in a single terminal window.
+
+It is useful for ergonomics, since you can get a lot more done on the
+command-line this way, without using your mouse and while keeping everything
+important on screen.
+
+It is also useful on remote or embedded systems since your session does not go
+down even if the connection between your machine and the remote machine breaks.
+tmux is implemented as a server, so it keeps running even if the connection
+dies.
+
+tmux's server-based design can be used as way of screen-sharing and
+collaborating on the same shell session from anywhere in the world.
+
+# About this post
+
+This is not an in-depth comparison of GNU Screen and tmux. It's not even a list
+of the comprehensive features of tmux.
+
+This is a brain-dump documenting how I use tmux, and hopefully encouraging other
+people to give it a shot. Your mileage may vary.
+
+This blog post also contains a tmux-agnostic keyboard shortcut that can change
+your life. I mean that.
+
+# My tmux config
+
+To configure tmux, create a file called `~/.tmux.conf`. Here's mine:
+
+~~~
+set -g status off
+set -g mouse on
+set -g set-clipboard off
+bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M; \
+send-keys -M; send-keys -M; send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M; \
+send-keys -M; send-keys -M; send-keys -M' 'select-pane -t=; copy-mode -e; \
+send-keys -M; send-keys -M; send-keys -M; send-keys -M'"
+bind -n WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M; \
+send-keys -M; send-keys -M; send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M; \
+send-keys -M; send-keys -M; send-keys -M' 'select-pane -t=; copy-mode -e; \
+send-keys -M; send-keys -M; send-keys -M; send-keys -M'"
+bind -n C-Space select-pane -t :.+
+bind -n C-] split-window -h
+bind -n C-h split-window -v
+bind -n C-q kill-pane
+~~~
+
+This config file turns off status bars and all other earthly distractions. It
+also sets up a few handy shortcuts, and the one shortcut that will change your
+life.
+
+I've found these shortcuts to not interfere with other applications I use. One
+or two may interfere with corner-use-case Vim, but Vim uses every shortcut
+conceivable to mankind, so I'm blameless when it comes to this.
+
+# Keyboard shortcuts
+
+|||
+|-|-|
+|`Ctrl+]`| Creates a vertical split |
+|`Ctrl+h`| Creates a horizontal split |
+|`Ctrl+q`| Closes a split |
+|`Ctrl+b z`| Maximizes a split |
+|`Ctrl+b }`| Rotates splits |
+|`Ctrl+b s`| List all active tmux sessions and select any one |
+|`Ctrl+b $`| Name current session, if you're into that sort of thing |
+
+And finally, the shortcut that will undeniably change your life...
+
+**drum roll...**
+
+`Ctrl+space` to switch pane focus!
+
+I also set this shortcut up in my text editor of choice (currently, Sublime Text
+3). It allows me to effortlessly move the cursor between the left and the right
+panes, and has become second nature now. Coupled with Vim controls (in my
+editor), it means I rarely have to take my hands off the home row. I know Visual
+Studio binds this to Intellisense, but try it out for yourself, and do let me
+know in the unlikely event that it does change your life.
+
+# tmux commands
+
+Use these commands on the command-line to control tmux:
+
+|||
+|-|-|
+|`tmux`| Starts tmux in the current directory. Follow up with `Ctrl+]` or `Ctrl+h` to create panes and start working. |
+|`tmux attach`| If tmux is already running, directly open an existing session. Remember `Ctrl+b s` to switch sessions. |
+|`tmux detach`| Detaches from the session but keeps it running |
+|`tmux kill-server`| Quits tmux. Alternatively `Ctrl+q` repeatedly to exit.|
+
+# Clipboard ergonomics
+
+With a little bit of elbow grease, you can get tmux to automatically copy your
+left-mouse-drag-selection to the clipboard. The elbow grease is required because
+tmux requires a minimum version I keep forgetting, which is not installed on
+some modern Ubuntii by default. They also keep [messing with the config
+options](https://github.com/tmux/tmux/issues/754) to do so. Good luck finding
+this out. Let me know if you find a handy way to summarize this mess across tmux
+versions.
+
+`bind-key -t vi-copy MouseDragEnd1Pane copy-pipe "xclip -in -selection clipboard"`
+works on my machine for this. Likely won't work on yours.
+
+In the mean-time, if you want to copy something to clipboard (tested on Ubuntu
+terminal only), shift + mouse-drag a selection, right click and then click on
+copy.
+
+
+
+
+<!-- footer -->
+<hr style="margin: 0 0 5 0;"/>
+<center>
+<a href="mailto:apoorvaj@apoorvaj.io">Email</a> / <a href="https://twitter.com/ApoorvaJ">Twitter</a> / <a href="https://github.com/ApoorvaJ">GitHub</a> / <a href="cv.html">CV</a>
+</center>
+
+<script src="markdeep.min.js"></script><script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
+<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','https://www.google-analytics.com/analytics.js','ga'); ga('create', 'UA-18556434-3', 'auto'); ga('send', 'pageview'); </script>

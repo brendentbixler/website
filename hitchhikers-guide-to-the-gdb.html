@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" lang="en">
+    <link rel="alternate" type="application/rss+xml" href="feed.xml" title="Apoorva Joshi">
+    <link rel="stylesheet" id="style" type="text/css" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<div class="header">
+    <a href="http://apoorvaj.io/">apoorvaj.io</a>
+    <div style="float:right;">
+        <a href="about.html">about</a>,
+        <a href="cv.html">cv</a>
+    </div>
+</div>
+
+<article>
+<title>Hitchikers Guide To The GDB</title>
+<h1>Hitchikers Guide To The GDB</h1>
+<p class="subtitle">30-Nov-2016</p>
+
+<section>
+    <p>The GNU Debugger, lovingly known as GDB, is an essential tool if you’re doing C/C++ development on Linux. It is installed on most Linux systems by default and is extremely useful in a variety of situations. It’s also a very difficult tool to use if you’re new to this kind of thing.</p>
+
+    <p>I’ve been using GDB for a year now, but I began as a wide-eyed Visual Studio user. I’ve made it to the other side but the memories of my manpage-filled journey are still fresh in my mind. This article is an attempt at documenting some of the useful things that GDB can do for you, written especially for people new to the Linux toolchain.</p>
+</section>
+
+<section>
+    <h2>Contents</h2>
+    <ol>
+        <li><a href="#before-we-begin">Before we begin</a></li>
+        <li><a href="#seg-faults">Segmentation faults</a></li>
+        <li><a href="#loading-an-exec">Loading an executable</a></li>
+        <li><a href="#the-tui">The TUI</a></li>
+        <li><a href="#basic-commands">Basic commands</a></li>
+        <ol>
+            <li><a href="#breakpoints">Breakpoints and control flow</a></li>
+            <li><a href="#printing">Printing variables</a></li>
+            <li><a href="#callstack">The call stack</a></li>
+        </ol>
+        <li><a href="#advanced-breaks">Advanced break commands</a></li>
+        <ol>
+            <li><a href="#watchpoints">Watchpoints</a></li>
+            <li><a href="#catchpoints">Catchpoints</a></li>
+        </ol>
+        <li><a href="#multithreading">Multithreading</a></li>
+        <ol>
+            <li><a href="#threads">Threads</a></li>
+            <li><a href="#deadlocks">Debugging deadlocks</a></li>
+            <li><a href="#processes">Processes</a></li>
+            <li><a href="#attach">Attach</a></li>
+        </ol>
+        <li><a href="#disassembly">Disassembly</a></li>
+        <ol>
+            <li><a href="#source2asm">Source to assembly</a></li>
+            <li><a href="#asm2source">Assembly to source</a></li>
+        </ol>
+        <li><a href="#reverse">Reverse</a></li>
+        <li><a href="#custom-source-path">Custom source path</a></li>
+        <li><a href="#dynamic-loading">Dynamic loading</a></li>
+        <li><a href="#gdbinit">.gdbinit</a></li>
+        <li><a href="#history">History</a></li>
+    </ol>
+</section>
+
+<section>
+    <h2 id="before-we-begin">Before we begin</h2>
+
+    <p>In order to do most things, GDB requires debug symbols to be present in the binary you’re attempting to debug. Use the -g option with GCC while compilation to include these debug symbols in your executable. e.g. <code>gcc -g -o foo foo.c</code></p>
+</section>
+
+<section>
+    <h2 id="seg-faults">Segmentation faults</h2>
+
+    <p>This is likely the first thing you’ll end up needing, even before you want to step-debug your program. Say your program crashes with the classic <code>segmentation fault (core dumped)</code> error. Where is this supposed core dumped? Well, it usually isn’t dumped at all. Use the command <code>ulimit -c unlimited</code> on the terminal to set the core file size to unlimited, which tells the OS to dump everything it’s got.</p>
+
+    <p>Now if you run the program and the thing crashes, there will be a file called core in the current working directory. You can use this file to find out what went wrong. After you’ve got the core file, give it to GDB along with the executable’s name to start debugging: <code>gdb ./foo core</code>.</p>
+
+    <p>This will put you in debug mode in the stack frame where the segfault occurred. From here on, you can use the normal GDB workflow which is outlined in this article.</p>
+</section>
+
+<section>
+    <h2 id="loading-an-exec">Loading an executable</h2>
+
+    <p>If you’re not inspecting a core file, you usually want to start a program, set some breakpoints, and step through some code.</p>
+
+    <p>To start a program, use the command <code>gdb ./foo</code> (where foo, as is the convention in this article, is the name of the executable).</p>
+</section>
+
+<section>
+    <h2 id="the-tui">The TUI</h2>
+
+    <p>Before we start actual debugging, you’ll want to switch away from this empty GDB view, into something that is a tad friendlier. In classic GDB fashion, the most useful view is hidden away behind a magic incantation. Press <code>Ctrl + x</code>, a while in the gdb terminal. You should now be in the confusingly-named TUI (Text User Interface).</p>
+
+    <figure><img src="assets/tui.png"></figure>
+
+    <p>Advanced tip: You’ll be spending a lot of your time in this mode. If you want to start GDB in this mode by default, you may want to add an <code>alias gdb="gdb --tui"</code> to your .bashrc file.</p>
+
+    <p>While in the TUI mode, you will see the source code on the top half of the terminal and the command window on the bottom half. The up/down arrows scroll through the code instead of scrolling through the terminal command history, but you can use <code>Ctrl + p</code> or <code>Ctrl + n</code> for the command history.</p>
+
+    <p>If your program prints anything at any point, the TUI will get all garbled. Don’t panic: <code>Ctrl + l</code> will clean that up.</p>
+</section>
+
+<section>
+    <h2 id="basic-commands">Basic commands</h2>
+    <h3 id="breakpoints">Breakpoints and control flow</h3>
+
+<table>
+<tr><th>Command</th><th>Description</th><tr>
+<tr><td><code>start</code></td><td>Take a first step into the program</td></tr>
+<tr><td><code>step</code> / <code>s</code></td><td>Step into the current instruction</td></tr>
+<tr><td><code>next</code> / <code>n</code> </td><td>Step over the current instruction</td></tr>
+<tr><td><code>finish</code> </td><td>Step out of the current function</td></tr>
+<tr><td><code>b [line]</code> </td><td>Set breakpoint at given line in current file</td></tr>
+<tr><td><code>b [file]:[line]</code> </td><td>Set breakpoint at given line in given file</td></tr>
+<tr><td><code>b [func]</code> </td><td>Set breakpoint at start of given function</td></tr>
+<tr><td><code>delete</code></td><td>Clear all breakpoints</td></tr>
+<tr><td><code>run</code> / <code>r</code></td><td>Run the program if not already running</td></tr>
+<tr><td><code>continue</code> / <code>c</code> </td><td>Continue until breakpoint is hit</td></tr>
+<tr><td><code>kill</code> / <code>k</code> </td><td>Kill program but don't quit GDB</td></tr>
+<tr><td><code>quit</code> / <code>q</code></td><td>Kill the program if running and quit GDB</td></tr>
+<tr><td>(Enter key)</td><td>Repeat the last command</td></tr>
+</table>
+
+<h3 id="printing">Printing variables</h3>
+
+<table>
+<tr><td><code>ptype [var]</code></td><td>Print type info of the given variable</td></tr>
+<tr><td><code>print [var]</code></td><td>Print value of the given variable</td></tr>
+<tr><td><code>print *[var]</code></td><td>Print the dereferenced value of the variable</td></tr>
+<tr><td><code>info args</code></td><td>Print function arguments</td></tr>
+<tr><td><code>info locals</code></td><td>Print local variables</td></tr>
+</table>
+
+<h3 id="callstack">The call stack</h3>
+
+<table>
+<tr><td><code>bt</code></td><td>Print full call stack</td></tr>
+<tr><td><code>up</code></td><td>Move up the call stack</td></tr>
+<tr><td><code>down</code></td><td>Move down the call stack</td></tr>
+<tr><td><code>frame [num]</code></td><td>Move to the given stack frame</td></tr>
+</table>
+
+    <p>Moving to a stack frame takes you to that point in the code if you're in TUI mode. Additionally, now all the <code>info locals</code> and <code>info params</code> will print out the stuff relevant to the this stack frame.</p>
+</section>
+
+<section>
+    <h2 id="advanced-breaks">Advanced break commands</h2>
+    <h3 id="watchpoints">Watchpoints</h3>
+
+    <p>Using watchpoints, you can trigger a break in execution whenever the value of an expression changes. You do do this using the command: <code>watch [expr]</code>. You'll usually want to put the name of a variable in the expression.</p>
+
+    <p>This can be useful when debugging large, unfamiliar code bases where you are only interested in specific variables changing in the course of execution.</p>
+
+    <h3 id="catchpoints">Catchpoints</h3>
+
+    <p>Catchpoints allow you to break execution on exceptions, or more importantly, syscalls. This is <em>very</em> powerful when combined with the <a href="https://jvns.ca/blog/2016/05/06/a-workshop-on-strace-and-tcpdump/">strace</a> tool.</p>
+
+    <p>You can catch a syscall using: <code>catch syscall [syscall]</code>.</p>
+
+    <p>For instance, <code>catch syscall open</code> will break any time your program initiates an <code>open</code> syscall.</p>
+</section>
+
+<section>
+    <h2 id="multithreading">Multithreading</h2>
+
+    <h3 id="threads">Threads</h3>
+
+    <table>
+        <tr><td><code>info threads</code></td><td>Print threads</td></tr>
+        <tr><td><code>thread [num]</code></td><td>Move to the given thread</td></tr>
+    </table>
+
+    <p>Switching threads works similarly to moving stack frames.</p>
+
+    <h3 id="deadlocks">Debugging deadlocks</h3>
+
+    <p>Debugging deadlocks can be a tricky matter, especially if you’re dealing with a lot of complex multithreading. If a thread is permanently waiting on a mutex, you can find the thread that’s holding the mutex by doing the following:</p>
+
+    <p><ol>
+        <li>Navigate to the thread and stack frame that’s waiting on the mutex. You can navigate to this frame using the info threads, thread <code>[num]</code>, <code>bt</code>, and <code>frame [num]</code> commands.</li>
+        <li>Now you can print the thread ID of the mutex’s owner using the gdb command <code>print mutex.__data.__owner</code>.</li>
+    </ol></p>
+
+    <p>You can now go to that thread and figure out why it is not releasing the mutex properly.</p>
+
+    <h3 id="processes">Processes</h3>
+
+    <p>If your application modifies process behavior, you may want some advanced GDB features to debug these.</p>
+
+    <p>In Linux, there are two main process-related syscalls - <code>fork</code> and <code>exec</code>.</p>
+
+    <p>The following commands can be used to tell GDB which process to follow after the new process is spawned:</p>
+
+    <p><code>set follow-fork-mode [child / parent]</code> : By default, GDB will follow the parent. If you set it to follow the child, GDB will do so once the child has been forked.</p>
+
+    <p><code>set follow-exec-mode [new / same]</code> : By default, GDB will replace the current process with the new process to be exec'ed. You can change this by switching to the <code>new</code> mode, in which a new process is created, which GDB then follows.</p>
+
+    <h3 id="attach">Attach</h3>
+
+    <p>Speaking of processes, you may not always want to start debugging your program from the get go. In this case, you can also attach GDB to a process that is already running. In the terminal, before starting GDB, you can use the command <code>ps -a</code> to list running processes and their IDs.</p>
+
+    <p>You can then start GDB and attach to your target using the command: <code>attach [process_id]</code>.</p>
+
+    <p>Depending on your configuration, you may have to start GDB as the root user (using <code>sudo gdb</code>) in order to do this.</p>
+</section>
+
+<section>
+    <h2 id="disassembly">Disassembly</h2>
+
+    <p>GDB offers some really handy functions to view the disassembly.</p>
+
+    <p><code>layout split</code> switches to a TUI view where you can see three panes - the command pane, the original source, and the disassembly. The disassembly and the source are correlated, so when you scroll using the up/down arrows, both panes scroll in coordination with each other.</p>
+
+    <h3 id="source2asm">Source to assembly</h3>
+
+    <p><code>info line</code> prints out the address range of the current line of source.<br>
+    <code>info line [func]</code> prints out the address range of the given function.</p>
+
+    <h3 id="asm2source">Assembly to source</h3>
+
+    <p><code>info line *0xffff</code> prints out the source line and file where the given assembly address maps to.</p>
+
+    <p>You can use these as an interactive way to navigate through assembly. This is friendlier than searching through raw disassembler output.</p>
+</section>
+
+<section>
+    <h2 id="reverse">Reverse</h2>
+
+    <p>GDB can also remember execution steps and then interactively rewind through time. While this is extremely useful, when activated, this slows down execution and generates a lot of extra data in memory. Use the following GDB commands to control reverse debugging.</p>
+
+    <table>
+    <tr><td><code>record</code></td><td>Start recording each instruction step</td></tr>
+    <tr><td><code>record stop</code></td><td>Stop recording</td></tr>
+    <tr><td><code>rn</code></td><td>Similar to the <code>n</code> command, but in reverse</td></tr>
+    <tr><td><code>rs</code></td><td>Similar to the <code>s</code> command, but in reverse</td></tr>
+    </table>
+
+    <p>In my experience, reverse debugging doesn't always work reliably, but is quite useful for short pieces of code.</p>
+
+    <h2 id="custom-source-path">Custom source path</h2>
+
+    <p>Source files may not be available in the same path as embedded in the ELF. This can happen for any number of reasons, but most commonly when the machine you're running on isn't the one you built the code on. If this happens, you can substitute the original path with the new path using: <code>set substitute-path [original_path] [new_path]</code></p>
+</section>
+
+<section>
+    <h2 id="dynamic-loading">Dynamic loading</h2>
+
+    <p>If you are dynamically loading a shared object file (.so), GDB may not recognize the files or functions you want to break on. It'll thus ask whether you want to set a breakpoint on a future library load, and you'll have to say yes.</p>
+
+    <p>This may get tiring after a while, so you can just use the following command to tell GDB to always allow this: <code>set breakpoint pending on</code></p>
+
+    <p>If you're wondering why typing this lengthy string is better than just occasionally saying yes in a terminal dialog, this is where the .gdbinit file comes in.</p>
+</section>
+
+<section>
+    <h2 id="gdbinit">.gdbinit</h2>
+
+    <p>As you can see, GDB has a <em>lot</em> of commands. Typing these in repeatedly can become cumbersome. Sometimes you can't just kill the program and run it without quitting GDB, e.g. when forking is involved.</p>
+
+    <p>A good way of handling this is to create a <code>~/.gdbinit</code> file. GDB reads this file and executes the instructions in it after startup. You can write commands in here that you may find yourself otherwise repeating, in order to reduce the tedium.</p>
+
+    <p>For example, the following .gdbinit file runs our program foo with dummy command-line arguments, sets up a few gdb variables, and breaks at a certain point.</p>
+
+<pre><code>    set breakpoint pending on # Disables that pesky dialog
+
+    file foo          # Equivalent to saying "gdb ./foo"
+    set args --dummy1 # Set foo's arguments, if any
+
+    b some_function # Set a breakpoint
+
+    # b 42  # Commented-out breakpoint. This file can be
+            # quickly edited to avoid remembering all the
+            # points of interest.
+
+    r       # Run the program
+</code></pre>
+
+    <p>And now if you just type in "gdb" into the terminal, gdb will start, open the "foo" program, set the breakpoint, run the program with any given arguments, and will wait.</p>
+
+    <p>Handy, eh?</p>
+</section>
+
+<section>
+    <h2 id="history">History</h2>
+
+    <p>If you want to retain command history across GDB sessions, you can add the following to your .gdbinit file:</p>
+
+    <pre><code>    set history filename ~/.gdb_history
+    set history save on
+    set history size 10000</code></pre>
+
+<hr>
+
+    <p>If you have comments, suggestions, corrections or questions, feel free to get in touch with me on Twitter or email (links in the footer).</p>
+</section>
+
+</article>
+
+<hr style="margin: 0 0 0.5rem 0"/>
+<div class="footer"><div style="float:right;"><a href="mailto:apoorvaj@apoorvaj.io">email</a>, <a href="https://github.com/ApoorvaJ">github</a>, <a href="https://twitter.com/ApoorvaJ">twitter</a></div></div>
+
+<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','https://www.google-analytics.com/analytics.js','ga'); ga('create', 'UA-18556434-3', 'auto'); ga('send', 'pageview'); </script>
+</body>
+</html>
