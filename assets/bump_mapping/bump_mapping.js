@@ -135,9 +135,9 @@ function start() {
 
 	// Init textures
 	{
-		tex_norm = load_texture("assets/bump_mapping/normal.png", tex_norm);
-		tex_diffuse = load_texture("assets/bump_mapping/diffuse.png", tex_diffuse);
-		tex_depth = load_texture("assets/bump_mapping/depth.png", tex_depth);
+		tex_norm = load_texture("assets/bump_mapping/normal.png");
+		tex_diffuse = load_texture("assets/bump_mapping/diffuse.png");
+		tex_depth = load_texture("assets/bump_mapping/depth.png");
 	}
 
 	time = 0;
