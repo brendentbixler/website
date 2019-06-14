@@ -14,6 +14,11 @@
     </script>
     <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML'></script>
     <!-- MathJax -->
+    <!-- Highlight -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/styles/vs.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <!-- Highlight -->
 </head>
 <body>
 <div class="header">
@@ -25,153 +30,140 @@
 </div>
 
 <article>
-<title>Alpha Compositing, OpenGL Blending and Premultiplied Alpha</title>
-<h1>Alpha Compositing, OpenGL Blending and Premultiplied Alpha</h1>
-<p class="subtitle">30-Dec-2015</p>
+<title>Alpha compositing, OpenGL blending and premultiplied alpha</title>
+<h1>Alpha compositing, OpenGL blending and premultiplied alpha</h1>
+<p class="subtitle">30-Dec-2015 (First published), 15-Jun-2019 (Last revised)</p>
 
 <section>
-    <p>I've been implementing alpha blending in <a href="https://github.com/ApoorvaJ/Papaya">Papaya</a> for the past few days, and figured that a blog post about alpha compositing with OpenGL might be useful for other developers in the future.</p>
-</section>
-
-<section>
-    <h2>What is alpha compositing?</h2>
-
-    <p><a href="https://en.wikipedia.org/wiki/Alpha_compositing">Alpha compositing</a> is the process of combining an image with a background to create the appearance of partial or full transparency.</p>
-
     <figure><img src="assets/blending.svg" style="width:70%"/></figure>
+    <p>Image compositing is the process of combining one or more images into a single one. Compositing can be done in any number of ways, but a very common way of doing it is to use the alpha channel for blending. Here, alpha is loosely treated as opacity.<label for="sn-1" class="margin-toggle sidenote-number"></label>
+        <input type="checkbox" id="sn-1" class="margin-toggle"/>
+        <span class="sidenote">The precise interpretation is more nuanced, as described in <a href="http://jcgt.org/published/0004/02/03/paper-lowres.pdf"><em>Interpreting Alpha</em></a> by Andrew Glassner.</span>
+    </p>
 
-    <p>Essentially, it is the process of drawing two potentially transparent images on top of each other to create a resultant image. It is the equivalent of the image produced when a layer is blended with the "Normal" blend mode on top of another layer in Photoshop.</p>
+    <p>This is the equivalent of the image produced when a layer is composited on another layer with the "Normal" blend mode in Photoshop. This technique was widely popularized by a seminal paper published in 1984.<label for="sn-2" class="margin-toggle sidenote-number"></label>
+        <input type="checkbox" id="sn-2" class="margin-toggle"/>
+        <span class="sidenote"><a href="https://keithp.com/~keithp/porterduff/p253-porter.pdf"><em>Compositing Digital Images</em></a> by Thomas Porter and Tom Duff.</span>
+     This compositing technique is so common these days that most people conceptualize alpha as <em>being</em> transparency, instead of just a numeric channel.</p>
 </section>
-
 <section>
     <h2>Conventions and nomenclature</h2>
 
-    <p>To simplify the discussion here, we'll only talk about compositing two images at a time. More images can be composited in exactly the same way, one after the other.</p>
+    <p>To simplify the discussion here, we'll only talk about compositing two images at a time. More images can be composited in exactly the same way, one after the other. We'll call the background image the <em>destination</em>, since it is already present in the buffer we want to composite on. We'll call the foreground image the <em>source</em>.</p>
 
-    <p>Let us call the base image the <em>destination</em> image, since it is already present in the buffer we want to composite on.</p>
-
-    <p>Let us call the image to be "overlayed" the <em>source</em> image.</p>
-
-    <p>Any given pixel consists of the channels Red, Green, Blue and Alpha, denoted by \((R, G, B, A)\). The subscript of the channel name denotes the image it belongs to.</p>
-
-    <p>Any given pixel in the <em>source</em> image consists of channels \((R_s, G_s, B_s, A_s)\).</p>
-
-    <p>Any given pixel in the <em>destination</em> image consists of channels \((R_d, G_d, B_d, A_d)\).</p>
-
-    <p>Any given pixel in the <em>final</em> image consists of channels \((R_f, G_f, B_f, A_f)\).</p>
+    <p>Each image has four channels: <b>R</b>ed, <b>G</b>reen, <b>B</b>lue and <b>A</b>lpha. \((R_d, G_d, B_d, A_d)\) are the destination image channels, \((R_s, G_s, B_s, A_s)\) are the source image channels, and \((R, G, B, A)\) are the resultant image channels.</p>
 
     <p>For simplicity, we will assume that all channels lie in the range \([0, 1]\).</p>
 </section>
 
 <section>
-    <h2>How OpenGL blending works</h2>
+    <h2>Interlude: The OpenGL blending API</h2>
+
+    <p></p> 
 
     <p>If blending is not activated explicitly, OpenGL overwrites the destination with the source image by default. In order to enable and control blending, there are three main function calls:</p>
 
     <p><ol>
-        <li><code>glEnable(GL_BLEND)</code>: <a href="http://docs.gl/gl2/glEnable">This</a> activates blending.</li>
-        <li><code>glBlendEquation(<em>mode</em>)</code>: This function is used to set the blend mode. The blend modes dictates what is done with the scaled source and destination values. <br><br><em>e.g.</em> The most common blend mode, <code>GL_FUNC_ADD</code>, evaluates channels by addition. So \(R_f = R_s k_s + R_d k_d\). Green, Blue and Alpha channels are computed similarly.<br><br><code>GL_FUNC_SUBTRACT</code>, on the other hand, evaluates by subtraction. So \(R_f = R_s k_s - R_d k_d\). You can read in detail about this function in the <a href="http://docs.gl/gl2/glBlendEquation">docs</a>.<br><br>If you're wondering what the \(k_s\) and \(k_d\) variables are, that leads me to the third function.</li>
-        <li><code>glBlendFunc(</code>\(k_s\)<code>, </code>\(k_d\)<code>)</code>: This function is used to set the values of the scaling factors \(k_s\) and \(k_d\) for source and destination respectively. For a full list of the values the function accepts, read the <a href="http://docs.gl/gl2/glBlendFunc">docs</a>.
-        </li>
+        <li><code><a href="http://docs.gl/gl2/glEnable">glEnable</a>(GL_BLEND)</code> activates blending.</li>
+        <li><code><a href="http://docs.gl/gl2/glBlendEquation">glBlendEquation</a>(<em>mode</em>)</code> sets the blend mode. The blend mode dictates what is done with the scaled source and destination values. <br><br><em>e.g.</em> The most common blend mode, <code>GL_FUNC_ADD</code>, evaluates channels by addition. So \(R = R_s k_s + R_d k_d\). Green, Blue and Alpha channels are computed similarly.<br><br><code>GL_FUNC_SUBTRACT</code>, on the other hand, evaluates by subtraction. So \(R = R_s k_s - R_d k_d\).<br><br>If you're wondering what the \(k_s\) and \(k_d\) variables are, that leads me to the third function.</li>
+        <li><code><a href="http://docs.gl/gl2/glBlendFunc">glBlendFunc</a>(</code>\(k_s\)<code>, </code>\(k_d\)<code>)</code>: This function is used to set the values of the scaling factors \(k_s\) and \(k_d\) for source and destination respectively.</li>
     </ol></p>
 </section>
 
 <section>
-    <h2>The common way of alpha blending</h2>
+    <h2>The mathematics of alpha compositing</h2>
 
-    <p>Commonly, you'll find blending set up like this:</p>
-
-    <pre><code class="cpp">    glBlendEquation (GL_FUNC_ADD);
-    glBlendFunc     (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);</code></pre>
-
-    <p>The above glBlendFunc sets the scaling factors to the following:
-
+    <p>The following formula described in the Porter-Duff paper is used to get the final composited pixel colors:
     \[\begin{align}
-    k_s &= A_s \\
-    k_d &= (1 - A_s)
-    \end{align}\]
-    </p>
+    A &= A_s + A_d (1 - A_s) \\
+    (R, G, B) &= \frac{(R_s, G_s, B_s) A_s + (R_d, G_d, B_d) \mathbf{A_d} (1 - A_s)}{A}
+    \end{align}\]</p>
+</section>
 
-    <p>Combined with <code>GL_FUNC_ADD</code>, the full formula for the final alpha \(A_f\) becomes:
+<section>
+    <h2>Optimization: Opaque destination</h2>
 
+    <p>Many times—for instance in a game frame—your background image is guaranteed to be fully opaque, meaning \(A_d = 1\). In this case, the formula becomes:
     \[\begin{align}
-    A_f &= A_s k_s + A_d k_d \\
-    \therefore A_f &= A_s A_s + A_d (1 - A_s)
-    \end{align}\]
-    </p>
-
-    <p>Similarly, final values for red, green and blue \((R_f, G_f, B_f)\) become:
-
-    \[(R_f, G_f, B_f) = (R_s, G_s, B_s) A_s + (R_d, G_d, B_d) (1 - A_s)\]</p>
-
-    <p>At first glance, this formula looks passable, but is in fact incorrect. The Wikipedia page for alpha compositing has the <a href="https://en.wikipedia.org/wiki/Alpha_compositing#Alpha_blending">correct formulas</a>. These formulas are:
-
-    \[\begin{align}
-    A_f &= A_s + A_d (1 - A_s) \\
-    (R_f, G_f, B_f) &= \frac{(R_s, G_s, B_s) A_s + (R_d, G_d, B_d) \mathbf{A_d} (1 - A_s)}{A_f}
+    A &= A_s + (1 - A_s) = 1 \\
+    (R, G, B) &= (R_s, G_s, B_s) A_s + (R_d, G_d, B_d)(1 - A_s)
     \end{align}\]</p>
 
-    <p>Note the complete lack of the \(\mathbf{A_d}\) in the incorrect formula. One critical case in which the incorrect approach falls apart is when the destination image is translucent, <em>i.e.</em> when \(A_d < 1\).</p>
+    <p>In this case, you can set up OpenGL to do blending as follows:</p>
 
-    <p>I suspect that 3D engines do this because the destination is usually some kind of game frame, which usually does not have transparency. In image processing, however, this is not the case.</p>
+    <pre><code>    glBlendEquation (GL_FUNC_ADD);
+    glBlendFunc     (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);</code></pre>
 
-    <p>The correct formula for \((R_f, G_f, B_f)\) seemingly breaks our OpenGL API. It needs <em>two</em> multiplications instead of one: \(A_d\) and \((1 - A_s)\), and one final division by \(A_f\). How do we achieve this?</p>
 </section>
 
 <section>
-    <h2>Alpha premultiplication</h2>
+    <h2>Pragmatism interlude: What if my destination isn't opaque?</h2>
 
-    <p>If a color is given by \((R, G, B, A)\), that color when premultiplied, becomes \((R \cdot A, G \cdot A, B \cdot A, A)\). In simple terms, when a color is premultiplied, its color channels are multiplied by its alpha.</p>
+    <p>With \(A_d \neq 1\), the formula seemingly breaks our OpenGL API. It needs <em>two</em> multiplications instead of one: \(A_d\) and \((1 - A_s)\), and one final division by \(A\). How do we achieve this?</p>
 
-    <p>Looking back at our correct formula,
+    <p>Pragmatic answer: If you can get away with it performance-wise, write a shader that samples two textures, and render to a third target texture with the composited result. The shader itself would look something like this:</p>
 
-\[\begin{align}
-(R_f, G_f, B_f) &= \frac{(R_s, G_s, B_s) A_s + (R_d, G_d, B_d) A_d (1 - A_s)}{A_f} \\
-\therefore \color{blue}{(R_f, G_f, B_f) A_f} &= \color{blue}{(R_s, G_s, B_s) A_s} + \color{blue}{(R_d, G_d, B_d) A_d} (1 - A_s)
-\end{align}\]</p>
+    <pre><code>uniform sampler2D tex_dst;
+uniform sampler2D tex_src;
+varying vec2 frag_uv;
 
-    <p>Voila! The three parts highlighted in blue are essentially the premultiplied versions of the final, source and destination colors.</p>
+void main() {
+    vec4 dst = texture2D(tex_dst, frag_uv);
+    vec4 src = texture2D(tex_src, frag_uv);
 
-    <p>Note that the above formula is now in the OpenGL API form, with glBlendEquation set to <code>GL_FUNC_ADD</code> and glBlendFunc set to:
+    float final_alpha = src.a + dst.a * (1.0 - src.a);
+    gl_FragColor = vec4(
+        (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / final_alpha,
+        final_alpha
+    );
+}</code></pre>
 
-\[\begin{align}
-k_s &= 1 \\
-k_d &= (1 - A_s)
-\end{align}\]</p>
+    <p>So, what's the difference between a shader like this, and the OpenGL blending API? The OpenGL blending API makes the computation happen on specialized hardware located within the GPU sub-unit called the Render Output Unit (ROP)<label for="sn-3" class="margin-toggle sidenote-number"></label>,
+        <input type="checkbox" id="sn-3" class="margin-toggle"/>
+        <span class="sidenote"><a href="https://developer.nvidia.com/content/life-triangle-nvidias-logical-pipeline"><em>Life of a triangle - NVIDIA's logical pipeline</em></a> by Christoph Kubisch.</span>
+        while our shader version executes on the shader execution hardware (called a <em>Streaming Multiprocessor (SM)</em> on NVIDIA hardware or a <em>Compute Unit (CU)</em> on AMD hardware.)</p>
 
-    <p>This glBlendFunc corresponds to <code>glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)</code>.</p>
+    <p>Technically, executing on the ROP is faster because you are executing on specialized ROP hardware meant for blending (which ends up being used anyway, even in the shader case), and because you're freeing up the shader cores to do other work.</p>
 
-    <p>Therefore, if the source and destination images are premultiplied, the above setup yields the resultant image, which is in premultiplied form too. We must reverse the premultiplication process if we want to use the image outside our internal graphics pipeline.</p>
+    <p>Even the original Porter-Duff paper describes the "proper" optimization, i.e. premultiplied alpha. But the paper was written in a time where GPUs didn't exist, and CPUs were slow.</p>
+
+    <p>Today, GPUs exist, CPU clock speeds are much higher, and we're limited by memory access times more often than we are by computation. So, if you can get away with it, write a shader; it involves much less code than what I'm about to describe, and it probably runs fast enough.</p>
 </section>
 
 <section>
-    <h2>Conclusion</h2>
+    <h2>Premultiplied alpha</h2>
 
-    <p>To sum everything up, our pipeline now operates like this:</p>
+    <p>Finally. Let's see how to use hardware blending, even for non-opaque destinations.</p>
+
+    <p>Let's look back to our initial formula, and move the denominator over to the left:
+
+\[\begin{align}
+(R, G, B) &= \frac{(R_s, G_s, B_s) A_s + (R_d, G_d, B_d) A_d (1 - A_s)}{A} \\
+\therefore \color{brown}{(R, G, B) A} &= \color{olive}{(R_s, G_s, B_s) A_s} + \color{magenta}{(R_d, G_d, B_d) A_d} (1 - A_s)
+\end{align}\]</p>
+
+    <p>When we load the <span style="color:olive">source image</span>, we multiply its color channels by its alpha. We do the same when we load the <span style="color: magenta">destination image</span>. Now we can use <code>GL_FUNC_ADD</code> and <code>glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)</code> and get the <span style="color:brown">final image</span>, but also in premultiplied form.</p>
+
+    <p>We must reverse the premultiplication process by computing\((\frac{R}{A}, \frac{G}{A}, \frac{B}{A}, A)\), if when want to use or save the composited result.</p>
+
+    <p>To recap premultiplied alpha, our pipeline now operates like this:</p>
 
     <p><ol>
-        <li>Render destination image onto frame buffer using <a href="https://github.com/ApoorvaJ/Papaya/blob/919b45ab62b43b4f3dca4dea192b058da98aa487/src/papaya.cpp#L726">premultiplication shader</a>.</li>
+        <li>Render the premultiplied destination image onto the frame buffer.</li>
 
-        <li>Render source image onto frame buffer, again, using premultiplication shader, now with blending enabled, <code>glBlendEquation(GL_FUNC_ADD)</code>, and <code>glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)</code>.</li>
+        <li>Render the premultiplied source image onto the frame buffer, with blending enabled, <code>glBlendEquation(GL_FUNC_ADD)</code>, and <code>glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)</code>.</li>
 
-        <li>Reverse the premultiplication process (I like to call this demultiplication), using the <a href="https://github.com/ApoorvaJ/Papaya/blob/919b45ab62b43b4f3dca4dea192b058da98aa487/src/papaya.cpp#L747">demultiplication shader</a>.</li>
+        <li>Repeat steps 1 & 2 if you have multiple images to be composited.</li>
+
+        <li>Render the composited result onto another render texture, while reversing the premultiplication process by dividing by the alpha. This is the final image we want.</li>
     </ol></p>
 
-    <p>The demultiplied image is the correctly alpha blended image.</p>
-
-    <p>Note that the simplest form of demultiplication might produce invalid color values when divided by zero alpha. This does not matter in usual cases because alpha is zero, but it is relevant when the texture is mipmapped.</p>
-</section>
-
-<section>
-    <h2>Further reading</h2>
-
-    <p><ul>
-        <li><a href="https://developer.nvidia.com/content/alpha-blending-pre-or-not-pre">Premultiplication for correct filtering</a> <em>by John McDonald</em></li>
-        <li><a href="http://eelpi.gotdns.org/blog.wiki.html">Premultiplied alpha (part 1 and 2)</a> <em>by Tom Forsyth</em> (The blog is super difficult to permalink. Look in the right sidebar for the blog posts.)</li>
-</ul></p>
-</section>
-
-<section>
+    <p>Note that the simplest form of reversing premultiplication might produce invalid color values when divided by zero alpha. This does not matter if the resultant texture is sampled using point filtering, but it is relevant otherwise.<label for="sn-4" class="margin-toggle sidenote-number"></label>
+        <input type="checkbox" id="sn-4" class="margin-toggle"/>
+        <span class="sidenote"><a href="https://developer.nvidia.com/content/alpha-blending-pre-or-not-pre"><em>Alpha Blending: To Pre or Not To Pre</em></a> by John McDonald.</span>
+        </p>
+    </p>
+<hr>
     <p>If you have any corrections or suggestions, please get in touch via email or Twitter (links in footer).</p>
 </section>
 
